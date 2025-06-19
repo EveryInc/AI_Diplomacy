@@ -1,50 +1,20 @@
+from pathlib import Path
 from dotenv import load_dotenv
-import logging
 import os
 from typing import Dict, List, Tuple, Set, Optional
 from diplomacy import Game
 import csv
 from typing import TYPE_CHECKING
-import random
-import string
-import json
+from loguru import logger
 
 # Avoid circular import for type hinting
 if TYPE_CHECKING:
     from .clients import BaseModelClient
     # If DiplomacyAgent is used for type hinting for an 'agent' parameter:
-    # from .agent import DiplomacyAgent 
+    # from .agent import DiplomacyAgent
 
-logger = logging.getLogger("utils")
-logger.setLevel(logging.INFO)
-logging.basicConfig(level=logging.INFO)
 
 load_dotenv()
-
-
-def atomic_write_json(data: dict, filepath: str):
-    """Writes a dictionary to a JSON file atomically."""
-    try:
-        # Ensure the directory exists
-        dir_name = os.path.dirname(filepath)
-        if dir_name:
-            os.makedirs(dir_name, exist_ok=True)
-        
-        # Write to a temporary file in the same directory
-        temp_filepath = f"{filepath}.tmp.{os.getpid()}"
-        with open(temp_filepath, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=4)
-        
-        # Atomically rename the temporary file to the final destination
-        os.rename(temp_filepath, filepath)
-    except Exception as e:
-        logger.error(f"Failed to perform atomic write to {filepath}: {e}", exc_info=True)
-        # Clean up temp file if it exists
-        if os.path.exists(temp_filepath):
-            try:
-                os.remove(temp_filepath)
-            except Exception as e_clean:
-                logger.error(f"Failed to clean up temp file {temp_filepath}: {e_clean}")
 
 
 def assign_models_to_powers() -> Dict[str, str]:
@@ -52,40 +22,40 @@ def assign_models_to_powers() -> Dict[str, str]:
     Example usage: define which model each power uses.
     Return a dict: { power_name: model_id, ... }
     POWERS = ['AUSTRIA', 'ENGLAND', 'FRANCE', 'GERMANY', 'ITALY', 'RUSSIA', 'TURKEY']
-    Models supported: o3-mini, o4-mini, o3, gpt-4o, gpt-4o-mini, 
-                    claude-opus-4-20250514, claude-sonnet-4-20250514, claude-3-5-haiku-20241022, claude-3-5-sonnet-20241022, claude-3-7-sonnet-20250219 
-                    gemini-2.0-flash, gemini-2.5-flash-preview-04-17, gemini-2.5-pro-preview-03-25, 
+    Models supported: o3-mini, o4-mini, o3, gpt-4o, gpt-4o-mini,
+                    claude-opus-4-20250514, claude-sonnet-4-20250514, claude-3-5-haiku-20241022, claude-3-5-sonnet-20241022, claude-3-7-sonnet-20250219
+                    gemini-2.0-flash, gemini-2.5-flash-preview-04-17, gemini-2.5-pro-preview-03-25,
                     deepseek-chat, deepseek-reasoner
                     openrouter-meta-llama/llama-3.3-70b-instruct, openrouter-qwen/qwen3-235b-a22b, openrouter-microsoft/phi-4-reasoning-plus:free,
-                    openrouter-deepseek/deepseek-prover-v2:free, openrouter-meta-llama/llama-4-maverick:free, openrouter-nvidia/llama-3.3-nemotron-super-49b-v1:free, 
+                    openrouter-deepseek/deepseek-prover-v2:free, openrouter-meta-llama/llama-4-maverick:free, openrouter-nvidia/llama-3.3-nemotron-super-49b-v1:free,
                     openrouter-google/gemma-3-12b-it:free, openrouter-google/gemini-2.5-flash-preview-05-20
     """
-    
+
     # POWER MODELS
-    """
+
     return {
-        "AUSTRIA": "openrouter-google/gemini-2.5-flash-preview-05-20",
-        "ENGLAND": "openrouter-moonshotai/kimi-dev-72b:free",
-        "FRANCE": "together-arcee-ai/AFM-4.5B-Preview",
-        "GERMANY": "openrouter-google/gemini-2.5-flash-lite-preview-06-17",
-        "ITALY": "together-lgai/exaone-deep-32b",
-        "RUSSIA": "deepseek-reasoner",
-        "TURKEY": "openrouter-cohere/command-a",
+        "AUSTRIA": "o3",
+        "ENGLAND": "gpt-4.1-2025-04-14",
+        "FRANCE": "o3-pro",
+        "GERMANY": "gpt-4o",
+        "ITALY": "o3",
+        "RUSSIA": "gpt-4o",
+        "TURKEY": "o4-mini",
     }
-    """
+
     # TEST MODELS
-    
+    """
     return {
-        "AUSTRIA": "openrouter-google/gemini-2.5-flash-preview-05-20",
-        "ENGLAND": "openrouter-google/gemini-2.5-flash-preview-05-20",
-        "FRANCE": "openrouter-google/gemini-2.5-flash-preview-05-20",
-        "GERMANY": "openrouter-google/gemini-2.5-flash-preview-05-20",
-        "ITALY": "openrouter-google/gemini-2.5-flash-preview-05-20",  
-        "RUSSIA": "openrouter-google/gemini-2.5-flash-preview-05-20",
-        "TURKEY": "openrouter-google/gemini-2.5-flash-preview-05-20",
+        "AUSTRIA": "openrouter-google/gemini-2.5-flash-preview",
+        "ENGLAND": "openrouter-google/gemini-2.5-flash-preview",
+        "FRANCE": "openrouter-google/gemini-2.5-flash-preview",
+        "GERMANY": "openrouter-google/gemini-2.5-flash-preview",
+        "ITALY": "openrouter-google/gemini-2.5-flash-preview",  
+        "RUSSIA": "openrouter-google/gemini-2.5-flash-preview",
+        "TURKEY": "openrouter-google/gemini-2.5-flash-preview",
     }
-    
-    
+    """
+
 
 def gather_possible_orders(game: Game, power_name: str) -> Dict[str, List[str]]:
     """
@@ -102,100 +72,116 @@ def gather_possible_orders(game: Game, power_name: str) -> Dict[str, List[str]]:
 
 async def get_valid_orders(
     game: Game,
-    client,                       # BaseModelClient instance
+    client,  # This is the BaseModelClient instance
     board_state,
     power_name: str,
     possible_orders: Dict[str, List[str]],
-    game_history,
-    model_error_stats,
-    agent_goals=None,
-    agent_relationships=None,
-    agent_private_diary_str=None,
+    game_history,  # This is GameHistory instance
+    model_error_stats: Dict[str, Dict[str, int]],
+    agent_goals: Optional[List[str]] = None,
+    agent_relationships: Optional[Dict[str, str]] = None,
+    agent_private_diary_str: Optional[str] = None,  # Added new parameter
     log_file_path: str = None,
     phase: str = None,
-) -> Dict[str, List[str]]:
+) -> List[str]:
     """
-    Generates orders with the LLM, validates them by round-tripping through the
-    engine, and returns **both** the accepted and rejected orders so the caller
-    can record invalid attempts.
-
-    Returns
-    -------
-    dict : { "valid": [...], "invalid": [...] }
+    Tries up to 'max_retries' to generate and validate orders.
+    If invalid, we append the error feedback to the conversation
+    context for the next retry. If still invalid, return fallback.
     """
 
-    # ── 1. Ask the model ───────────────────────────────────────
-    raw_orders = await client.get_orders(
+    # Ask the LLM for orders
+    orders = await client.get_orders(
         game=game,
         board_state=board_state,
         power_name=power_name,
         possible_orders=possible_orders,
-        conversation_text=game_history,
+        conversation_text=game_history,  # Pass GameHistory instance
         model_error_stats=model_error_stats,
         agent_goals=agent_goals,
         agent_relationships=agent_relationships,
-        agent_private_diary_str=agent_private_diary_str,
+        agent_private_diary_str=agent_private_diary_str,  # Pass the diary string
         log_file_path=log_file_path,
         phase=phase,
     )
 
-    invalid_info: list[str] = []
-    valid:   list[str] = []
-    invalid: list[str] = []
+    # Initialize list to track invalid order information
+    invalid_info = []
 
-    # ── 2. Type check ──────────────────────────────────────────
-    if not isinstance(raw_orders, list):
-        logger.warning("[%s] Orders received from LLM are not a list: %s. Using fallback.",
-                       power_name, raw_orders)
-        model_error_stats[client.model_name]["order_decoding_errors"] += 1
-        return {"valid": client.fallback_orders(possible_orders), "invalid": []}
+    # Validate each order
+    all_valid = True
+    valid_orders = []
 
-    # ── 3. Round-trip validation with engine ───────────────────
-    CODE_TO_ENGINE = {
-        "AUT": "AUSTRIA", "ENG": "ENGLAND", "FRA": "FRANCE",
-        "GER": "GERMANY", "ITA": "ITALY",  "RUS": "RUSSIA", "TUR": "TURKEY",
-    }
-    engine_power = power_name if power_name in game.powers else CODE_TO_ENGINE[power_name]
+    if not isinstance(orders, list):  # Ensure orders is a list before iterating
+        logger.warning(
+            f"[{power_name}] Orders received from LLM is not a list: {orders}. Using fallback."
+        )
+        model_error_stats[client.model_name]["order_decoding_errors"] += (
+            1  # Use client.model_name
+        )
+        return client.fallback_orders(possible_orders)
 
-    for move in raw_orders:
-        if not move or not move.strip():
+    for move in orders:
+        # Skip empty orders
+        if not move or move.strip() == "":
             continue
 
-        upper = move.upper()
-
-        # WAIVE is always valid
-        if upper == "WAIVE":
-            valid.append("WAIVE")
+        # Handle special case for WAIVE
+        if move.upper() == "WAIVE":
+            valid_orders.append(move)
             continue
 
-        game.clear_orders(engine_power)
-        game.set_orders(engine_power, [upper])
-        normed = game.get_orders(engine_power)
+        # Example move: "A PAR H" -> unit="A PAR", order_part="H"
+        tokens = move.split(" ", 2)
+        if len(tokens) < 3:
+            invalid_info.append(
+                f"Order '{move}' is malformed; expected 'A PAR H' style."
+            )
+            all_valid = False
+            continue
 
-        if normed:                   # accepted
-            valid.append(normed[0])
-        else:                        # rejected
-            invalid.append(upper)
+        unit = " ".join(tokens[:2])  # e.g. "A PAR"
+        order_part = tokens[2]  # e.g. "H" or "S A MAR"
+
+        # Use the internal game validation method
+        if order_part == "B":  # Build orders
+            validity = 1  # hack because game._valid_order doesn't support 'B'
+        elif order_part == "D":  # Disband orders
+            # Check if the unit is actually one of the power's units
+            if unit in game.powers[power_name].units:
+                validity = 1  # Simple check, engine handles full validation
+            else:
+                validity = 0
+        else:  # Movement, Support, Hold, Convoy, Retreat
+            try:
+                validity = game._valid_order(
+                    game.powers[power_name], unit, order_part, report=1
+                )
+            except Exception as e:
+                logger.warning(f"Error validating order '{move}': {e}")
+                invalid_info.append(f"Order '{move}' caused an error: {e}")
+                validity = 0
+                all_valid = False
+
+        if validity == 1:
+            valid_orders.append(move)
+        else:
             invalid_info.append(f"Order '{move}' is invalid for {power_name}")
+            all_valid = False
 
-    game.clear_orders(engine_power)  # clean slate for main engine flow
+    # Log validation results
+    if invalid_info:
+        logger.debug(f"[{power_name}] Invalid orders: {', '.join(invalid_info)}")
 
-    # ── 4. Legacy logging & stats updates ──────────────────────
-    if invalid_info:                                # at least one bad move
-        logger.debug("[%s] Invalid orders: %s", power_name, ", ".join(invalid_info))
-        model_error_stats[client.model_name]["order_decoding_errors"] += 1
-        logger.debug("[%s] Some orders invalid, using fallback.", power_name)
+    if all_valid and valid_orders:
+        logger.debug(f"[{power_name}] All orders valid: {valid_orders}")
+        return valid_orders
     else:
-        logger.debug("[%s] All orders valid: %s", power_name, valid)
-
-    # ── 5. Fallback when nothing survives ─────────────────────
-    if not valid:
+        logger.debug(f"[{power_name}] Some orders invalid, using fallback.")
+        # Use client.model_name for stats key, as power_name might not be unique if multiple agents use same model
+        model_error_stats[client.model_name]["order_decoding_errors"] += 1
         fallback = client.fallback_orders(possible_orders)
-        return {"valid": fallback, "invalid": invalid}
-
-    return {"valid": valid, "invalid": invalid}
-
-
+        return fallback
 
 
 def normalize_and_compare_orders(
@@ -258,7 +244,9 @@ def normalize_and_compare_orders(
         issued_set = set()
         if pwr in issued_orders:
             try:
-                issued_set = {normalize_order(o) for o in issued_orders.get(pwr, []) if o}
+                issued_set = {
+                    normalize_order(o) for o in issued_orders.get(pwr, []) if o
+                }
             except Exception as e:
                 logger.error(f"Error normalizing issued orders for {pwr}: {e}")
 
@@ -266,7 +254,9 @@ def normalize_and_compare_orders(
         accepted_set = set()
         if pwr in accepted_orders_dict:
             try:
-                accepted_set = {normalize_order(o) for o in accepted_orders_dict.get(pwr, []) if o}
+                accepted_set = {
+                    normalize_order(o) for o in accepted_orders_dict.get(pwr, []) if o
+                }
             except Exception as e:
                 logger.error(f"Error normalizing accepted orders for {pwr}: {e}")
 
@@ -283,114 +273,96 @@ def normalize_and_compare_orders(
 
 
 # Helper to load prompt text from file relative to the expected 'prompts' dir
-def load_prompt(filename: str, prompts_dir: Optional[str] = None) -> str:
-    """
-    Return the contents of *filename* while never joining paths twice.
-
-    Logic
-    -----
-    1. If *filename* is absolute         → use it directly.
-    2. Elif *filename* already contains a path component (e.g. 'x/y.txt')
-       → treat it as a relative path and use it directly.
-    3. Elif *prompts_dir* is provided    → join prompts_dir + filename.
-    4. Otherwise                         → join the package’s default prompts dir.
-    """
-    if os.path.isabs(filename):                    # rule 1
-        prompt_path = filename
-    elif os.path.dirname(filename):                # rule 2  (has slash)
-        prompt_path = filename                     # relative but already complete
-    elif prompts_dir:                              # rule 3
-        prompt_path = os.path.join(prompts_dir, filename)
-    else:                                          # rule 4
-        default_dir = os.path.join(os.path.dirname(__file__), "prompts")
-        prompt_path = os.path.join(default_dir, filename)
-
+def load_prompt(filename: str) -> str:
+    """Helper to load prompt text from file"""
+    # Assuming execution from the root or that the path resolves correctly
+    # Consider using absolute paths or pkg_resources if needed for robustness
+    prompt_path = os.path.join(os.path.dirname(__file__), "prompts", filename)
     try:
-        with open(prompt_path, "r", encoding="utf-8") as fh:
-            return fh.read().strip()
+        with open(prompt_path, "r", encoding="utf-8") as f:  # Added encoding
+            return f.read().strip()
     except FileNotFoundError:
         logger.error(f"Prompt file not found: {prompt_path}")
+        # Return an empty string or raise an error, depending on desired handling
         return ""
-
-
 
 
 # == New LLM Response Logging Function ==
 def log_llm_response(
-    log_file_path: str,
+    log_file_path: Path,
     model_name: str,
-    power_name: Optional[str], # Optional for non-power-specific calls like summary
+    power_name: Optional[str],  # Optional for non-power-specific calls like summary
     phase: str,
     response_type: str,
-    raw_input_prompt: str, # Added new parameter for the raw input
+    raw_input_prompt: str,  # Added new parameter for the raw input
     raw_response: str,
     success: str,  # Changed from bool to str
 ):
     """Appends a raw LLM response to a CSV log file."""
+    assert log_file_path is not None
     try:
         # Ensure the directory exists
         log_dir = os.path.dirname(log_file_path)
-        if log_dir: # Ensure log_dir is not empty (e.g., if path is just a filename)
-             os.makedirs(log_dir, exist_ok=True)
+        if log_dir:  # Ensure log_dir is not empty (e.g., if path is just a filename)
+            os.makedirs(log_dir, exist_ok=True)
 
         # Check if file exists to write header
         file_exists = os.path.isfile(log_file_path)
 
         with open(log_file_path, "a", newline="", encoding="utf-8") as csvfile:
             # Added "raw_input" to fieldnames
-            fieldnames = ["model", "power", "phase", "response_type", "raw_input", "raw_response", "success"]
+            fieldnames = [
+                "model",
+                "power",
+                "phase",
+                "response_type",
+                "raw_input",
+                "raw_response",
+                "success",
+            ]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
             if not file_exists:
                 writer.writeheader()  # Write header only if file is new
 
-            writer.writerow({
-                "model": model_name,
-                "power": power_name if power_name else "game", # Use 'game' if no specific power
-                "phase": phase,
-                "response_type": response_type,
-                "raw_input": raw_input_prompt, # Added raw_input to the row
-                "raw_response": raw_response,
-                "success": success,
-            })
+            writer.writerow(
+                {
+                    "model": model_name,
+                    "power": power_name
+                    if power_name
+                    else "game",  # Use 'game' if no specific power
+                    "phase": phase,
+                    "response_type": response_type,
+                    "raw_input": raw_input_prompt,  # Added raw_input to the row
+                    "raw_response": raw_response,
+                    "success": success,
+                }
+            )
     except Exception as e:
-        logger.error(f"Failed to log LLM response to {log_file_path}: {e}", exc_info=True)
+        logger.error(
+            f"Failed to log LLM response to {log_file_path}: {e}", exc_info=True
+        )
 
 
 # == New Async LLM Wrapper with Logging ==
 async def run_llm_and_log(
-    client: 'BaseModelClient',
+    client: "BaseModelClient",
     prompt: str,
     log_file_path: str,  # Kept for context, but not used for logging here
-    power_name: Optional[str], # Kept for context, but not used for logging here
-    phase: str, # Kept for context, but not used for logging here
-    response_type: str, # Kept for context, but not used for logging here
-    temperature: float = 0.0,
+    power_name: Optional[str],  # Kept for context, but not used for logging here
+    phase: str,  # Kept for context, but not used for logging here
+    response_type: str,  # Kept for context, but not used for logging here
 ) -> str:
     """Calls the client's generate_response and returns the raw output. Logging is handled by the caller."""
-    raw_response = "" # Initialize in case of error
+    raw_response = ""  # Initialize in case of error
     try:
-        raw_response = await client.generate_response(prompt, temperature=temperature)
+        raw_response = await client.generate_response(prompt)
     except Exception as e:
         # Log the API call error. The caller will decide how to log this in llm_responses.csv
-        logger.error(f"API Error during LLM call for {client.model_name}/{power_name}/{response_type} in phase {phase}: {e}", exc_info=True)
+        logger.error(
+            f"API Error during LLM call for {client.model_name}/{power_name}/{response_type} in phase {phase}: {e}",
+            exc_info=True,
+        )
         # raw_response remains "" indicating failure to the caller
     return raw_response
 
-# This generates a few lines of random alphanum chars to inject into the 
-# system prompt. This lets us use temp=0 while still getting variation 
-# between trials.
-# Temp=0 is important for better performance on deciding moves, and to 
-# ensure valid json outputs.
-def generate_random_seed(n_lines: int = 5, n_chars_per_line: int = 80):
-        # Generate x lines of y random alphanumeric characters
-        seed_lines = [
-            ''.join(random.choices(string.ascii_letters + string.digits, k=n_chars_per_line))            
-            for _ in range(n_lines)
-        ]
-        random_seed_block = (
-            "<RANDOM SEED PLEASE IGNORE>\n" +
-            "\n".join(seed_lines) +
-            "\n</RANDOM SEED>"
-        )
-        return random_seed_block
