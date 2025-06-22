@@ -145,6 +145,9 @@ diplomacy/animation/dist
 ai_animation/src/elevenlabskey.txt
 
 ai_diplomacy/alt_implementations
+./ai_animation/public/game*
+./ai_animation/public/games/*
+**/games
 /experiments
 game_moments.json
 game_moments_report.md
@@ -158,3 +161,7 @@ model_power_statistics.csv
 
 ## LLM stuff
 **/.claude/
+
+# Bot client logs
+./bot_client/*.txt
+./bot_client/logs/
