@@ -11,25 +11,28 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
 def _load_prompt_file(filename: str, prompts_dir: Optional[str] = None) -> str | None:
     """A local copy of the helper from agent.py to avoid circular imports."""
     import os
+
     try:
         if prompts_dir:
             filepath = os.path.join(prompts_dir, filename)
         else:
             current_dir = os.path.dirname(os.path.abspath(__file__))
-            default_prompts_dir = os.path.join(current_dir, 'prompts')
+            default_prompts_dir = os.path.join(current_dir, "prompts")
             filepath = os.path.join(default_prompts_dir, filename)
 
-        with open(filepath, 'r', encoding='utf-8') as f:
+        with open(filepath, "r", encoding="utf-8") as f:
             return f.read()
     except Exception as e:
         logger.error(f"Error loading prompt file {filepath}: {e}")
         return None
 
+
 async def run_diary_consolidation(
-    agent: 'DiplomacyAgent',
+    agent: "DiplomacyAgent",
     game: "Game",
     log_file_path: str,
     entries_to_keep_unsummarized: int = 6,
@@ -45,7 +48,8 @@ async def run_diary_consolidation(
     )
 
     full_entries = [
-        e for e in agent.full_private_diary
+        e
+        for e in agent.full_private_diary
         if not e.startswith("[CONSOLIDATED HISTORY]")
     ]
 
@@ -68,20 +72,20 @@ async def run_diary_consolidation(
         return
 
     cutoff_year = int(match.group(1))
-    logger.info(
-        f"[{agent.power_name}] Cut-off year for consolidation: {cutoff_year}"
-    )
+    logger.info(f"[{agent.power_name}] Cut-off year for consolidation: {cutoff_year}")
 
     def _entry_year(entry: str) -> int | None:
         m = re.search(r"\[[SFWRAB]\s*(\d{4})", entry)
         return int(m.group(1)) if m else None
 
     entries_to_summarize = [
-        e for e in full_entries
+        e
+        for e in full_entries
         if (_entry_year(e) is not None and _entry_year(e) < cutoff_year)
     ]
     entries_to_keep = [
-        e for e in full_entries
+        e
+        for e in full_entries
         if (_entry_year(e) is None or _entry_year(e) >= cutoff_year)
     ]
 
@@ -98,7 +102,9 @@ async def run_diary_consolidation(
         )
         return
 
-    prompt_template = _load_prompt_file("diary_consolidation_prompt.txt", prompts_dir=prompts_dir)
+    prompt_template = _load_prompt_file(
+        "diary_consolidation_prompt.txt", prompts_dir=prompts_dir
+    )
     if not prompt_template:
         logger.error(
             f"[{agent.power_name}] diary_consolidation_prompt.txt missing — aborting"
@@ -119,7 +125,6 @@ async def run_diary_consolidation(
         raw_response = await run_llm_and_log(
             client=consolidation_client,
             prompt=prompt,
-            log_file_path=log_file_path,
             power_name=agent.power_name,
             phase=game.current_short_phase,
             response_type="diary_consolidation",
@@ -156,3 +161,4 @@ async def run_diary_consolidation(
             raw_response=raw_response,
             success=success_flag,
         )
+
