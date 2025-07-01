@@ -31,3 +31,4 @@ dependencies = [
 ]
 [tool.ruff]
 exclude = ["diplomacy", "docs"]
+line-length = 150
