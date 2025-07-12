@@ -10,6 +10,79 @@ import { PowerENUM, ProvinceENUM } from "../types/map";
 import { UnitTypeENUM } from "../types/units";
 import { sineWave, getTimeInSeconds } from "../utils/timing";
 
+
+function buildFancyArrow(length: number, colorDeter: string): THREE.Mesh {
+
+  const tw   = 3.5;
+  const headLength  = tw * 4;
+  const hw   = tw * 4;
+  
+  const shape = new THREE.Shape()
+  .moveTo(0,tw/2)
+  .lineTo(length- headLength,tw/2)
+  .lineTo(length-headLength,hw/2)
+  .lineTo(length,0)
+  .lineTo(length-headLength,-hw/2)
+  .lineTo(length-headLength,-tw/2)
+  .lineTo(0,-tw/2)
+  .closePath();
+  
+  const extrude= new THREE.ExtrudeGeometry(shape, {depth: 1})
+  let mat: THREE.Material;
+
+  if (colorDeter=='Move') {
+      mat = new THREE.MeshStandardMaterial({color: 0x00FF00})
+  } else if (colorDeter=='Bounce') {
+      mat = new THREE.MeshStandardMaterial({color: 0xFF0000})
+  }
+  const mesh= new THREE.Mesh(extrude, mat)
+  return mesh;
+}
+
+//create an arrow from the unit’s current pos toward the target
+function createMoveArrow(scene: THREE.Scene, unitMesh: THREE.Group, destination: ProvinceENUM): THREE.ArrowHelper {
+  const startPos = unitMesh.position.clone();
+  const endPos = getProvincePosition(destination)!;
+
+  // compute direction & length
+  const dir = new THREE.Vector3()
+    .subVectors(endPos, startPos)
+  const length = startPos.distanceTo(endPos) - 2; //subtracted a bit so the arrow tip doesn't overlap the unit
+
+  const color = 0x00FF00
+
+  const arrow = new THREE.ArrowHelper(dir, startPos, length, color, 1, 0.5);
+  scene.add(arrow);
+
+  unitMesh.userData.moveArrow = arrow;
+  return arrow;
+}
+
+
+//Different color arrow for bounce to differentate moves (red=bounce, green=regular move)
+function createBounceArrow(
+  scene: THREE.Scene,
+  unitMesh: THREE.Group,
+  destination: ProvinceENUM)
+  : THREE.ArrowHelper {
+    const startPos = unitMesh.position.clone();
+    const endPos= getProvincePosition(destination)!;
+
+    // compute direction & length
+  const dir = new THREE.Vector3()
+  .subVectors(endPos, startPos)
+  const length = startPos.distanceTo(endPos) - 2; //subtracted a bit so arrow tip doesn't overlap the unit
+
+  const color = 0xFF0000
+
+  const arrow = new THREE.ArrowHelper(dir, startPos, length, color, 1, 0.5);
+  scene.add(arrow);
+
+  unitMesh.userData.moveArrow = arrow;
+  return arrow;
+  }
+
+
 function getUnit(unitOrder: UnitOrder, power: string) {
   if (power === undefined) throw new Error("Must pass the power argument, cannot be undefined")
   let posUnits = gameState.unitMeshes.filter((unit) => {
@@ -54,7 +127,34 @@ function createMoveAnimation(unitMesh: THREE.Group, orderDestination: ProvinceEN
   // Store animation start time for consistent wave motion
   const animStartTime = getTimeInSeconds();
   
-  let anim = new Tween(unitMesh.position)
+  const start = new THREE.Vector3();
+  //prevents the arrow mesh from using local coords which mess with the alignment 
+  unitMesh.getWorldPosition(start);  
+  const end = getProvincePosition(orderDestination)!;
+  //lines to determine direction and length of the arrow, minus a little from the length so it's offset 
+  const direct= new THREE.Vector3().subVectors(end, start);
+  const length= Math.max(direct.length() - 2, 0);
+  const arrowMesh= buildFancyArrow(length,'Move');
+  const dir = direct.clone().normalize();
+  
+  arrowMesh.position.copy(start);
+
+  //Core of the arrow alignment, won't work without this
+  const q = new THREE.Quaternion().setFromUnitVectors(
+      new THREE.Vector3(1, 0, 0),dir                         
+    );
+  arrowMesh.setRotationFromQuaternion(q);
+
+  arrowMesh.scale.set(0, 1, 1);
+
+  gameState.scene.add(arrowMesh);
+  unitMesh.userData.moveArrow = arrowMesh;
+//Value beside x:1 controls the speed of the growth
+const ArrowGrow = new Tween(arrowMesh.scale)
+  .to({ x: 1 }, 300)                    
+  .easing(Easing.Quadratic.Out)
+  .onComplete(() => {    
+    const anim = new Tween(unitMesh.position)
     .to({
       x: destinationVector.x,
       y: 10,
@@ -76,12 +176,68 @@ function createMoveAnimation(unitMesh: THREE.Group, orderDestination: ProvinceEN
         unitMesh.rotation.z = 0;
         unitMesh.rotation.x = 0;
       }
+      gameState.scene.remove(arrowMesh);
+      delete unitMesh.userData.moveArrow;
       unitMesh.userData.isAnimating = false
     })
     .start();
-  gameState.unitAnimations.push(anim);
-  return anim
+  gameState.unitAnimations.push(anim);})
+  .start()
+  gameState.unitAnimations.push(ArrowGrow)
+  return ArrowGrow
 }
+
+//Animation for bounce
+
+function createBounceAnimation(unitMesh: THREE.Group, attemptedDestination: ProvinceENUM): Tween {
+  const end = getProvincePosition(attemptedDestination)!;
+  if (!end) throw new Error(`No position found for attempted destination: ${attemptedDestination}`);
+
+  unitMesh.userData.isAnimating = true;
+
+  
+  const start = new THREE.Vector3();
+  //prevents the arrow mesh from using local coords which mess with the alignment 
+  unitMesh.getWorldPosition(start);  
+  //lines to determine direction and length of the arrow, minus a little from the length so it's offset 
+  const direct= new THREE.Vector3().subVectors(end, start);
+  const length= Math.max(direct.length() - 2, 0);
+  const arrowMesh= buildFancyArrow(length,'Bounce');
+  const dir = direct.clone().normalize();
+  
+  arrowMesh.position.copy(start);
+
+  //Core of the arrow alignment, won't work without this
+  const q = new THREE.Quaternion().setFromUnitVectors(
+      new THREE.Vector3(1, 0, 0), dir                         
+    );
+  arrowMesh.setRotationFromQuaternion(q);
+
+  //arrowMesh.scale.set(0, 1, 1);
+
+  gameState.scene.add(arrowMesh);
+  unitMesh.userData.moveArrow = arrowMesh;
+
+  const bounceOut = new Tween(unitMesh.position)
+    .to({ x: end.x, y: 10, z: end.z }, config.effectiveAnimationDuration / 2)
+    .easing(Easing.Quadratic.Out)
+    .repeat(1)
+    .yoyo(true)
+    .onComplete(() => {
+      if (unitMesh.userData.moveArrow) {
+        gameState.scene.remove(arrowMesh);
+        delete unitMesh.userData.moveArrow;
+        unitMesh.userData.isAnimating = false
+      }
+    });
+
+  bounceOut.start();
+
+  gameState.unitAnimations.push(bounceOut);
+  return bounceOut;
+}
+
+
 
 /**
  * Creates animations for unit movements based on orders from the previous phase
@@ -152,8 +308,11 @@ export function createAnimationsForNextPhase() {
           break;
 
         case "bounce":
-          // TODO: implement bounce animation
-          break;
+            if (unitIndex < 0) throw new Error("Unable to find unit for order " + order.raw)
+            if (!order.destination) throw new Error("Bounce order without destination")
+            createBounceAnimation(gameState.unitMeshes[unitIndex], order.destination as ProvinceENUM);
+            break;
+          
         case "hold":
           //TODO: Hold animation, maybe a sheild or something?
           break;
