@@ -9,9 +9,6 @@ CURRENT STATUS
 Game State:
 {board_state_str}
 
-Goals:
-{agent_goals}
-
 Relationships:
 {agent_relationships}
 
@@ -21,7 +18,7 @@ Write a concise diary note summarizing your orders.
 RESPONSE FORMAT
 Return ONLY a JSON object with this structure:
 {
-"order_summary": "Brief summary of orders and strategic intent"
+"order_summary": "Brief summary of orders"
 }
 
 Do not include any text outside the JSON.

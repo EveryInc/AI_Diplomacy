@@ -9,6 +9,7 @@ Control 18 supply centers. Nothing else will do.
   - Format: 'F [PROVINCE]/[COAST]' where [COAST] = NC (North), SC (South), EC (East), or WC (West)
   - Example: 'F SPA/SC - MAO'
   - Only fleets need coast specification.
+5. Aim to issue an order for all of your units. Holds tend to be wasted orders.
 
 Your Task:
 1. Reason

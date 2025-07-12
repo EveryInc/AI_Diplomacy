@@ -943,9 +943,12 @@ class OpenAIResponsesClient(BaseModelClient):
     This client makes direct HTTP requests to the v1/responses endpoint.
     """
 
-    def __init__(self, model_name: str, prompts_dir: Optional[str] = None):
+    def __init__(self, model_name: str, prompts_dir: Optional[str] = None, api_key: Optional[str] = None):
         super().__init__(model_name, prompts_dir=prompts_dir)
-        self.api_key = os.environ.get("OPENAI_API_KEY")
+        if api_key:
+            self.api_key = api_key
+        else:
+            self.api_key = os.environ.get("OPENAI_API_KEY")
         if not self.api_key:
             raise ValueError("OPENAI_API_KEY environment variable is required")
         self.base_url = "https://api.openai.com/v1/responses"

@@ -23,6 +23,7 @@ Version: 2.0 (Hard Mode with complete validation)
 import os
 import json
 import csv
+import sys
 import argparse
 from pathlib import Path
 from collections import defaultdict, Counter
@@ -41,6 +42,8 @@ except ImportError:
         raise ImportError(
             "models.PowerEnum not found via absolute or relative import. "
         ) from exc
+
+csv.field_size_limit(sys.maxsize)
 
 class StatisticalGameAnalyzer:
     """Production-ready analyzer for AI Diplomacy game statistics.
@@ -304,6 +307,12 @@ class StatisticalGameAnalyzer:
         # Always include game state features for context
         game_state_features = self._extract_game_state_features(power, phase, phase_data, game_data)
         features.update(game_state_features)
+
+        # Relationship snapshot column (e.g. "AUSTRIA:-1|FRANCE:2")
+        relationships_for_phase = self._get_relationships_for_phase(power, phase, phase_data)
+        features['relationships'] = '|'.join(
+            f"{p}:{self.relationship_values.get(r, 0)}" for p, r in relationships_for_phase.items()
+        )
         
         return features
     
@@ -363,6 +372,8 @@ class StatisticalGameAnalyzer:
                 
                 # Categorize by relationship
                 recipient = msg.get('recipient_power')
+                if recipient is None:
+                    continue
                 try:
                     normalized_recipient = PowerEnum(recipient).value
                 except ValueError:
@@ -473,7 +484,8 @@ class StatisticalGameAnalyzer:
             'military_units_count': 0,
             'territories_gained_vs_prev_phase': 0,
             'supply_centers_gained_vs_prev_phase': 0,
-            'military_units_gained_vs_prev_phase': 0
+            'military_units_gained_vs_prev_phase': 0,
+            'relationships': ''
         }
         
         # Get current state
@@ -630,7 +642,11 @@ class StatisticalGameAnalyzer:
             military_units_per_phase.append(military_units)
             
             # Get relationship data for sentiment calculations
-            agent_relationships = phase.get('agent_relationships', {})
+            if 'state_agents' in phase:
+                sa = phase['state_agents']
+                agent_relationships = {p: sa[p]['relationships'] for p in sa if 'relationships' in sa[p]}
+            else:
+                agent_relationships = phase.get('relationships', {})
             if power in agent_relationships:
                 power_relationships = agent_relationships[power]
                 
@@ -696,6 +712,8 @@ class StatisticalGameAnalyzer:
                             
                             # Categorize by relationship
                             recipient = msg.get('recipient_power')
+                            if recipient is None:
+                                continue
                             # This will coerce some known aliases to match the 7 acceptable names (see models.py)
                             normalized_recipient = PowerEnum(recipient)
                             
@@ -817,7 +835,14 @@ class StatisticalGameAnalyzer:
     
     def _get_relationships_for_phase(self, power: str, phase: str, phase_data: dict) -> dict:
         """Get relationships for a power in a specific phase."""
-        agent_relationships = phase_data.get('agent_relationships', {})
+        if (
+            'state_agents' in phase_data and
+            power in phase_data['state_agents'] and
+            'relationships' in phase_data['state_agents'][power]
+        ):
+            agent_relationships = {power: phase_data['state_agents'][power]['relationships']}
+        else:
+            agent_relationships = phase_data.get('relationships', {})
         return agent_relationships.get(power, {})
     
     def _get_previous_phase_data(self, current_phase: str, game_data: dict) -> Optional[dict]:
@@ -855,7 +880,11 @@ class StatisticalGameAnalyzer:
             'sentiment_change_from_prev': 0.0
         }
         
-        agent_relationships = phase_data.get('agent_relationships', {})
+        if 'state_agents' in phase_data:
+            sa = phase_data['state_agents']
+            agent_relationships = {p: sa[p]['relationships'] for p in sa if 'relationships' in sa[p]}
+        else:
+            agent_relationships = phase_data.get('relationships', {})
         if not agent_relationships:
             return metrics
             
@@ -1035,7 +1064,8 @@ class StatisticalGameAnalyzer:
             'military_units_count',
             'territories_gained_vs_prev_phase',
             'supply_centers_gained_vs_prev_phase',
-            'military_units_gained_vs_prev_phase'
+            'military_units_gained_vs_prev_phase',
+            'relationships'
         ]
         
         # Ensure all actual fields are included (in case we missed any)

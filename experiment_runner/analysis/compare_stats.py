@@ -23,6 +23,33 @@ from typing import Dict, List
 import numpy as np
 import pandas as pd
 from scipy import stats
+from statsmodels.stats import multitest as smm
+from statsmodels.stats import power as smp
+
+import warnings
+try:                                     # present from SciPy ≥ 1.10
+    from scipy._lib._util import DegenerateDataWarning
+except Exception:                        # fallback for older SciPy
+    class DegenerateDataWarning(UserWarning):
+        pass
+
+warnings.filterwarnings(
+    "ignore",
+    category=RuntimeWarning,
+    message="invalid value encountered in scalar divide",
+)
+warnings.filterwarnings(
+    "ignore",
+    category=RuntimeWarning,
+    message="Precision loss occurred in moment calculation",
+)
+warnings.filterwarnings(
+    "ignore",
+    category=RuntimeWarning,
+    message="The BCa confidence interval cannot be calculated.",
+)
+
+warnings.filterwarnings("ignore", category=DegenerateDataWarning)
 
 # ───────────────────────── helpers ──────────────────────────
 _EXCLUDE: set[str] = {
@@ -108,39 +135,119 @@ def _load_games(exp: Path) -> pd.DataFrame:
     return df_game
 
 
+# ───────────────── Advanced Statistics Helpers ──────────────────
+def _bayesian_t_test(a: np.ndarray, b: np.ndarray, alpha: float, n_samples: int = 10000):
+    """Perform a simple Bayesian t-test assuming uninformative priors."""
+    def posterior_samples(data):
+        n, mean, var = len(data), np.mean(data), np.var(data, ddof=1)
+        if n == 0 or var == 0: return np.full(n_samples, mean) # Handle edge cases
+        # Posterior parameters for Normal-Inverse-Gamma
+        mu_n, nu_n, alpha_n, beta_n = mean, n, n / 2, (n / 2) * var
+        # Sample from posterior
+        post_var = stats.invgamma.rvs(a=alpha_n, scale=beta_n, size=n_samples, random_state=0)
+        post_mean = stats.norm.rvs(loc=mu_n, scale=np.sqrt(post_var / nu_n), size=n_samples, random_state=1)
+        return post_mean
+
+    try:
+        post_a, post_b = posterior_samples(a), posterior_samples(b)
+        diff_samples = post_b - post_a
+        post_mean_diff = np.mean(diff_samples)
+        ci_low, ci_high = np.percentile(diff_samples, [100 * alpha / 2, 100 * (1 - alpha / 2)])
+        prob_b_gt_a = np.mean(diff_samples > 0)
+        return {
+            "Bayes_Post_Mean_Diff": post_mean_diff,
+            "Bayes_CI_low": ci_low,
+            "Bayes_CI_high": ci_high,
+            "Bayes_Prob_B_gt_A": prob_b_gt_a,
+        }
+    except Exception:
+        return {k: np.nan for k in ["Bayes_Post_Mean_Diff", "Bayes_CI_low", "Bayes_CI_high", "Bayes_Prob_B_gt_A"]}
+
 
 # ───────────────────── Welch statistics ──────────────────────
 def _welch(a: np.ndarray, b: np.ndarray, alpha: float) -> Dict:
+    # --- Frequentist Welch's t-test ---
     _t, p_val = stats.ttest_ind(a, b, equal_var=False)
     mean_a, mean_b = a.mean(), b.mean()
     diff = mean_b - mean_a
+    
+    s1, s2 = a.var(ddof=1), b.var(ddof=1)
+    n1, n2 = len(a), len(b)
+    se = np.sqrt(s1/n1 + s2/n2)
+    df = (s1/n1 + s2/n2)**2 / ((s1/n1)**2/(n1-1) + (s2/n2)**2/(n2-1))
+    ci = stats.t.ppf(1 - alpha/2, df) * se
+    
+    # --- Standard Deviations and Cohen's d ---
+    sd_a, sd_b = a.std(ddof=1), b.std(ddof=1)
     pooled_sd = np.sqrt((a.var(ddof=1) + b.var(ddof=1)) / 2)
     cohen_d = diff / pooled_sd if pooled_sd else np.nan
-    se = np.sqrt(a.var(ddof=1) / len(a) + b.var(ddof=1) / len(b))
-    df = len(a) + len(b) - 2
-    ci = stats.t.ppf(1 - alpha / 2, df=df) * se
+
+    # --- Normality/Symmetry Diagnostics ---
+    skew_a, kurt_a = stats.skew(a), stats.kurtosis(a)
+    skew_b, kurt_b = stats.skew(b), stats.kurtosis(b)
+
+    # --- Non-parametric p-value (Permutation Test) ---
+    try:
+        perm_res = stats.permutation_test((a, b), lambda x, y: np.mean(y) - np.mean(x), n_resamples=9999, random_state=0)
+        p_perm = perm_res.pvalue
+    except Exception:
+        p_perm = np.nan
+
+    # --- Power for a minimally interesting effect (d=0.5) ---
+    try:
+        power = smp.TTestIndPower().solve_power(effect_size=0.5, nobs1=len(a), alpha=alpha, ratio=len(b)/len(a))
+    except Exception:
+        power = np.nan
+
+    # --- Robust location estimate (Median difference with bootstrap CI) ---
+    try:
+        median_diff = np.median(b) - np.median(a)
+        res = stats.bootstrap((a, b), lambda x, y: np.median(y) - np.median(x),
+                              confidence_level=1-alpha, method='BCa', n_resamples=2499, random_state=0)
+        median_ci_low, median_ci_high = res.confidence_interval
+    except Exception:
+        median_diff, median_ci_low, median_ci_high = np.nan, np.nan, np.nan
+
+    # --- Leave-one-out influence summary ---
+    try:
+        loo_diffs_a = [np.mean(b) - np.mean(np.delete(a, i)) for i in range(len(a))]
+        loo_diffs_b = [np.mean(np.delete(b, i)) - np.mean(a) for i in range(len(b))]
+        all_loo_diffs = loo_diffs_a + loo_diffs_b
+        loo_diff_min, loo_diff_max = np.min(all_loo_diffs), np.max(all_loo_diffs)
+    except Exception:
+        loo_diff_min, loo_diff_max = np.nan, np.nan
+
+    # --- Bayesian analysis ---
+    bayes_results = _bayesian_t_test(a, b, alpha)
+
     return {
-        "Mean_A": mean_a,
-        "Mean_B": mean_b,
-        "Diff": diff,
-        "CI_low": diff - ci,
-        "CI_high": diff + ci,
-        "p_value": p_val,
+        "Mean_A": mean_a, "Mean_B": mean_b, "Diff": diff,
+        "SD_A": sd_a, "SD_B": sd_b,
+        "SE_diff": se,
+        "CI_low": diff - ci, "CI_high": diff + ci,
+        "p_value": p_val, "p_perm": p_perm,
         "Cohen_d": cohen_d,
-        "n_A": len(a),
-        "n_B": len(b),
+        "n_A": len(a), "n_B": len(b),
+        "Skew_A": skew_a, "Kurtosis_A": kurt_a,
+        "Skew_B": skew_b, "Kurtosis_B": kurt_b,
+        "Power_d_0.5": power,
+        "Median_Diff": median_diff, "Median_Diff_CI_low": median_ci_low, "Median_Diff_CI_high": median_ci_high,
+        "LOO_Diff_min": loo_diff_min, "LOO_Diff_max": loo_diff_max,
+        **bayes_results,
     }
 
 
 # ───────────────── console helpers ───────────────────────────
 def _fmt_row(label: str, r: Dict, width: int, ci_label: str) -> str:
     ci = f"[{r['CI_low']:+.2f}, {r['CI_high']:+.2f}]"
+    p_perm_val = r.get('p_perm', np.nan)
     return (
         f"  {label:<{width}} "
         f"{r['Diff']:+6.2f}  "
         f"({r['Mean_A']:.2f} → {r['Mean_B']:.2f})   "
         f"{ci_label} {ci:<17}  "
-        f"p={r['p_value']:.4g}   "
+        f"p={r['p_value']:.4g} "
+        f"(p_perm={p_perm_val:.3f})   "
         f"d={r['Cohen_d']:+.2f}"
     )
 
@@ -274,6 +381,8 @@ def run(exp_a: Path, exp_b: Path, alpha: float = 0.05) -> None:
         rows_agg.append({"Metric": col, **_welch(a_vals, b_vals, alpha)})
 
     agg_df = pd.DataFrame(rows_agg)
+    if not agg_df.empty:
+        p_vals = agg_df["p_value"].dropna()
     agg_csv = out_dir / f"comparison_aggregated_vs_{tag_b}.csv"
     agg_df.to_csv(agg_csv, index=False)
 
@@ -311,6 +420,9 @@ def run(exp_a: Path, exp_b: Path, alpha: float = 0.05) -> None:
             )
 
     pow_df = pd.DataFrame(rows_pow)
+    if not pow_df.empty:
+        p_vals = pow_df["p_value"].dropna()
+
     pow_csv = out_dir / f"comparison_by_power_vs_{tag_b}.csv"
     pow_df.to_csv(pow_csv, index=False)
 
@@ -327,7 +439,7 @@ def run(exp_a: Path, exp_b: Path, alpha: float = 0.05) -> None:
             if sub.empty:
                 continue
             n_a, n_b = int(sub.iloc[0]["n_A"]), int(sub.iloc[0]["n_B"])
-            print(f"{power} (n({tag_a})={n_a}, n({tag_b})={n_b})")
+            print(f"\n{power} (n({tag_a})={n_a}, n({tag_b})={n_b})")
             for _, r in sub.iterrows():
                 print(_fmt_row(r["Metric"], r, width, ci_label))
 
@@ -346,4 +458,3 @@ def run(exp_a: Path, exp_b: Path, alpha: float = 0.05) -> None:
         print(f"\n[warning] phase overlay plot generation failed: {exc}")
     
     print('Complete')
-

@@ -95,7 +95,6 @@ def parse_arguments():
     parser.add_argument(
         "--max_year",
         type=int,
-        default=1910, # Increased default
         help="Maximum year to simulate. The game will stop once this year is reached.",
     )
     parser.add_argument(
@@ -210,7 +209,14 @@ async def main():
         config.USE_UNFORMATTED_PROMPTS = False
         logger.info("Using original single-step formatted prompts")
 
-    # --- 1. Determine Run Directory and Mode (New vs. Resume) ---
+    if args.max_year == None:
+        if args.end_at_phase:
+            # infer the max year
+            args.max_year = int(args.end_at_phase[1:5])
+        else:
+            raise Exception("--max_year is required.")
+
+    # --- Determine Run Directory and Mode (New vs. Resume) ---
     run_dir = args.run_dir
     is_resuming = False
     if run_dir and os.path.exists(run_dir) and not args.critical_state_analysis_dir:
@@ -371,7 +377,7 @@ async def main():
             # what we record for prompt/history purposes
             submitted_orders_this_phase[p_name] = valid + invalid
 
-            # optional: diary entry only for the orders we tried to submit
+            # diary entry only for the orders we tried to submit
             if valid or invalid:
                 await agents[p_name].generate_order_diary_entry(
                     game, valid + invalid, llm_log_file_path
@@ -427,13 +433,14 @@ async def main():
                 await asyncio.gather(*consolidation_tasks, return_exceptions=True)
 
         # Agent State Updates
-        current_board_state = game.get_state()
-        state_update_tasks = [
-            agent.analyze_phase_and_update_state(game, current_board_state, phase_summary, game_history, llm_log_file_path)
-            for agent in agents.values() if not game.powers[agent.power_name].is_eliminated()
-        ]
-        if state_update_tasks:
-            await asyncio.gather(*state_update_tasks, return_exceptions=True)
+        if current_short_phase.endswith("M"):
+            current_board_state = game.get_state()
+            state_update_tasks = [
+                agent.analyze_phase_and_update_state(game, current_board_state, phase_summary, game_history, llm_log_file_path)
+                for agent in agents.values() if not game.powers[agent.power_name].is_eliminated()
+            ]
+            if state_update_tasks:
+                await asyncio.gather(*state_update_tasks, return_exceptions=True)
 
         # --- 4f. Save State At End of Phase ---
         save_game_state(game, agents, game_history, game_file_path, run_config, completed_phase)

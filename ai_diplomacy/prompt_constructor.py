@@ -42,6 +42,7 @@ def build_context_prompt(
     agent_private_diary: Optional[str] = None,
     prompts_dir: Optional[str] = None,
     include_messages: Optional[bool] = True,
+    display_phase: Optional[str] = None,
 ) -> str:
     """Builds the detailed context part of the prompt.
 
@@ -79,10 +80,13 @@ def build_context_prompt(
 
     # Decide which context builder to use.
     _use_simple = config.SIMPLE_PROMPTS
-    if _use_simple:
-        possible_orders_context_str = generate_rich_order_context(game, power_name, possible_orders)
+    if possible_orders is None:
+        possible_orders_context_str = "(not relevant in this context)"
     else:
-        possible_orders_context_str = generate_rich_order_context_xml(game, power_name, possible_orders)
+        if _use_simple:
+            possible_orders_context_str = generate_rich_order_context(game, power_name, possible_orders)
+        else:
+            possible_orders_context_str = generate_rich_order_context_xml(game, power_name, possible_orders)
 
     if include_messages:
         messages_this_round_text = game_history.get_messages_this_round(power_name=power_name, current_phase_name=year_phase)
@@ -133,9 +137,12 @@ def build_context_prompt(
     if "{order_history}" in context_template:
         context_template = context_template.replace("{order_history}", order_history_str)
 
+    if display_phase is None:
+        display_phase = year_phase
+
     context = context_template.format(
         power_name=power_name,
-        current_phase=year_phase,
+        current_phase=display_phase,
         all_unit_locations=units_repr,
         all_supply_centers=centers_repr,
         messages_this_round=messages_this_round_text,

@@ -21,6 +21,7 @@ import subprocess
 import sys
 import textwrap
 import time
+import uuid
 import multiprocessing as mp
 from datetime import datetime
 from pathlib import Path
@@ -326,6 +327,36 @@ def _mk_run_dir(exp_dir: Path, idx: int) -> Path:
     return run_dir
 
 
+def _make_game_ids_unique(run_dirs: Iterable[Path]) -> None:
+    """
+    Ensures every lmvsgame.json in *run_dirs* carries a distinct `"id"`.
+    If a duplicate is found we overwrite it with a fresh 16-char UUID
+    **after** the game has finished but **before** the analysis phase.
+    """
+    seen: set[str] = set()
+
+    for run_dir in run_dirs:
+        json_path = run_dir / "lmvsgame.json"
+        if not json_path.exists():
+            continue                        # should not happen, but be tolerant
+
+        try:
+            meta = json.loads(json_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue                        # invalid JSON → leave unchanged
+
+        gid = str(meta.get("id", "")).strip()
+        if not gid:
+            continue                        # no id field → nothing to fix
+
+        if gid in seen:                     # duplicate → replace
+            meta["id"] = uuid.uuid4().hex[:16]
+            json_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+            gid = meta["id"]
+
+        seen.add(gid)
+
+
 def _dump_seed(seed: int, run_dir: Path) -> None:
     seed_file = run_dir / "seed.txt"
     if not seed_file.exists():
@@ -506,6 +537,11 @@ def main() -> None:
     with open(summary_path, "w", encoding="utf-8") as fh:
         json.dump([res._asdict() for res in runs_meta], fh, indent=2, default=str)
     log.info("Run summary written → %s", summary_path)
+
+    # ------------------------------------------------------------------
+    #  De-duplicate game IDs (critical-state runs reuse the snapshot ID)
+    # ------------------------------------------------------------------
+    _make_game_ids_unique([r.run_dir for r in runs_meta])
 
     # ------------------------------------------------------------------ #
     #  Post-analysis pipeline                                            #

@@ -26,6 +26,7 @@ dependencies = [
   "sphinx>=8.2.3",
   "sphinx-copybutton>=0.5.2",
   "sphinx-rtd-theme>=3.0.2",
+  "statsmodels==0.14.4",
   "together>=1.5.17",
   "tornado>=5.0",
   "tqdm>=4.67.1",

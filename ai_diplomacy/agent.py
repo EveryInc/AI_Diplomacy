@@ -917,9 +917,6 @@ class DiplomacyAgent:
                 logger.warning(f"[{power_name}] No summary available for previous phase {last_phase_name}. Skipping state update.")
                 return
 
-            # == Fix: Use board_state parameter ==
-            possible_orders = game.get_all_possible_orders()
-
             # Get formatted diary for context
             formatted_diary = self.format_private_diary_for_prompt()
 
@@ -927,24 +924,18 @@ class DiplomacyAgent:
                 game=game,
                 board_state=board_state,  # Use provided board_state parameter
                 power_name=power_name,
-                possible_orders=possible_orders,  # Pass possible_orders
+                possible_orders=None, # don't include possible orders in the state update prompt
                 game_history=game_history,  # Pass game_history
-                agent_goals=self.goals,
+                agent_goals=[], # pass empty goals to force model to regenerate goals each phase
                 agent_relationships=self.relationships,
                 agent_private_diary=formatted_diary,  # Pass formatted diary
                 prompts_dir=self.prompts_dir,
+                include_messages=True,
+                display_phase=last_phase_name
             )
 
             # Add previous phase summary to the information provided to the LLM
             other_powers = [p for p in game.powers if p != power_name]
-
-            # Create a readable board state string from the board_state dict
-            board_state_str = "Board State:\n"
-            for p_name, power_data in board_state.get("powers", {}).items():
-                # Get units and centers from the board state
-                units = power_data.get("units", [])
-                centers = power_data.get("centers", [])
-                board_state_str += f"  {p_name}: Units={units}, Centers={centers}\n"
 
             # Extract year from the phase name (e.g., "S1901M" -> "1901")
             current_year = last_phase_name[1:5] if len(last_phase_name) >= 5 else "unknown"
@@ -953,11 +944,9 @@ class DiplomacyAgent:
                 power_name=power_name,
                 current_year=current_year,
                 current_phase=last_phase_name,  # Analyze the phase that just ended
-                board_state_str=board_state_str,
+                board_state_str=context,
                 phase_summary=last_phase_summary,  # Use provided phase_summary
                 other_powers=str(other_powers),  # Pass as string representation
-                current_goals="\n".join([f"- {g}" for g in self.goals]) if self.goals else "None",
-                current_relationships=str(self.relationships) if self.relationships else "None",
             )
             logger.debug(f"[{power_name}] State update prompt:\n{prompt}")
 
