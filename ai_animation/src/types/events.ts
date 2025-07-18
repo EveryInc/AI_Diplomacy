@@ -61,12 +61,7 @@ export class EventQueue {
    * Remove resolved events from the queue
    */
   cleanup(): void {
-    let clearedQueue = this.events.filter(event => !event.resolved);
-    if (clearedQueue.length <= 1) {
-      console.log(this.events)
-      throw new Error("We've cleared all the messages out of the queue")
-    }
-    this.events = clearedQueue
+    this.events = this.events.filter(e => !e.resolved);
   }
 
   /**
