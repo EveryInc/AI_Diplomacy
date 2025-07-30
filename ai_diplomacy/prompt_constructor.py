@@ -6,7 +6,7 @@ import logging
 from typing import Dict, List, Optional, Any  # Added Any for game type placeholder
 
 from config import config
-from .utils import load_prompt, get_prompt_path
+from .utils import load_prompt, get_prompt_path, get_board_state
 from .possible_order_context import (
     generate_rich_order_context,
     generate_rich_order_context_xml,
@@ -43,6 +43,8 @@ def build_context_prompt(
     prompts_dir: Optional[str] = None,
     include_messages: Optional[bool] = True,
     display_phase: Optional[str] = None,
+    include_order_history: Optional[str] = True,
+    include_possible_moves_summary: Optional[str] = False,
 ) -> str:
     """Builds the detailed context part of the prompt.
 
@@ -84,7 +86,7 @@ def build_context_prompt(
         possible_orders_context_str = "(not relevant in this context)"
     else:
         if _use_simple:
-            possible_orders_context_str = generate_rich_order_context(game, power_name, possible_orders)
+            possible_orders_context_str = generate_rich_order_context(game, power_name, possible_orders, include_summary=include_possible_moves_summary)
         else:
             possible_orders_context_str = generate_rich_order_context_xml(game, power_name, possible_orders)
 
@@ -99,25 +101,7 @@ def build_context_prompt(
     active_powers = [p for p in game.powers.keys() if not game.powers[p].is_eliminated()]
     eliminated_powers = [p for p in game.powers.keys() if game.powers[p].is_eliminated()]
 
-    # Build units representation with power status
-    units_lines = []
-    for p, u in board_state["units"].items():
-        u_str = ", ".join(u)
-        if game.powers[p].is_eliminated():
-            units_lines.append(f"  {p}: {u_str} [ELIMINATED]")
-        else:
-            units_lines.append(f"  {p}: {u_str}")
-    units_repr = "\n".join(units_lines)
-
-    # Build centers representation with power status
-    centers_lines = []
-    for p, c in board_state["centers"].items():
-        c_str = ", ".join(c)
-        if game.powers[p].is_eliminated():
-            centers_lines.append(f"  {p}: {c_str} [ELIMINATED]")
-        else:
-            centers_lines.append(f"  {p}: {c_str}")
-    centers_repr = "\n".join(centers_lines)
+    units_repr, centers_repr = get_board_state(board_state, game)
 
     # Build {home_centers}
     home_centers_str = ", ".join(HOME_CENTERS.get(power_name.upper(), []))
@@ -128,6 +112,9 @@ def build_context_prompt(
         current_phase_name=year_phase,
         num_movement_phases_to_show=1,
     )
+
+    if not include_order_history:
+        order_history_str = "" # !! setting to blank for ablation. REMEMBER TO REVERT!
 
     # Replace token only if it exists (template may not include it)
     if "{home_centers}" in context_template:
@@ -200,6 +187,10 @@ def construct_order_generation_prompt(
     instructions = load_prompt(instructions_file, prompts_dir=prompts_dir)
     _use_simple = config.SIMPLE_PROMPTS
 
+    include_order_history = False # defaulting to not include order history in order generation prompt for now
+    #if power_name.lower() == 'france':
+    #    include_order_history = True # REVERT THIS
+
     # Build the context prompt
     context = build_context_prompt(
         game,
@@ -212,16 +203,14 @@ def construct_order_generation_prompt(
         agent_private_diary=agent_private_diary_str,
         prompts_dir=prompts_dir,
         include_messages=not _use_simple,  # include only when *not* simple
+        include_order_history=include_order_history,
+        include_possible_moves_summary=True,
     )
 
-    # Append goals at the end for focus
-    goals_section = ""
-    if agent_goals:
-        goals_section = (
-            "\n\nYOUR STRATEGIC GOALS:\n" + "\n".join(f"- {g}" for g in agent_goals) + "\n\nKeep these goals in mind when choosing your orders."
-        )
+    # delete unused section from context:
+    context = context.replace('Messages This Round\n\n\nEnd Messages', '')
 
-    final_prompt = system_prompt + "\n\n" + context + "\n\n" + instructions + goals_section
+    final_prompt = system_prompt + "\n\n" + context + "\n\n" + instructions
 
     # Make the power names more LLM friendly
     final_prompt = (

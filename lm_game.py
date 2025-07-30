@@ -181,15 +181,30 @@ async def main():
     args = parse_arguments()
     start_whole = time.time()
 
+    logger.info(f"args.simple_prompts = {args.simple_prompts} (type: {type(args.simple_prompts)}), args.prompts_dir = {args.prompts_dir}")
+    logger.info(f"config.SIMPLE_PROMPTS before update = {config.SIMPLE_PROMPTS}")
+    
+    # IMPORTANT: Check if user explicitly provided a prompts_dir
+    user_provided_prompts_dir = args.prompts_dir is not None
+    
     if args.simple_prompts:
         config.SIMPLE_PROMPTS = True
         if args.prompts_dir is None:
             pkg_root = os.path.join(os.path.dirname(__file__), "ai_diplomacy")
             args.prompts_dir = os.path.join(pkg_root, "prompts_simple")
+            logger.info(f"Set prompts_dir to {args.prompts_dir} because simple_prompts=True and prompts_dir was None")
+        else:
+            # User provided their own prompts_dir, but simple_prompts is True
+            # This is likely a conflict - warn the user
+            logger.warning(f"Both --simple_prompts=True and --prompts_dir={args.prompts_dir} were specified. Using user-provided prompts_dir.")
+    else:
+        logger.info(f"simple_prompts is False, using prompts_dir: {args.prompts_dir}")
 
     # Prompt-dir validation & mapping
     try:
+        logger.info(f"About to parse prompts_dir: {args.prompts_dir}")
         args.prompts_dir_map = parse_prompts_dir_arg(args.prompts_dir)
+        logger.info(f"prompts_dir_map after parsing: {args.prompts_dir_map}")
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         sys.exit(1)
@@ -334,6 +349,17 @@ async def main():
             if neg_diary_tasks:
                 await asyncio.gather(*neg_diary_tasks, return_exceptions=True)
 
+        # Diary Consolidation
+        if current_short_phase.startswith("S") and current_short_phase.endswith("M"):
+            consolidation_tasks = [
+                run_diary_consolidation(agent, game, llm_log_file_path,
+                                        prompts_dir=agent.prompts_dir)
+                for agent in agents.values()
+                if not game.powers[agent.power_name].is_eliminated()
+            ]
+            if consolidation_tasks:
+                await asyncio.gather(*consolidation_tasks, return_exceptions=True)
+
         # --- 4c. Order Generation ---
         logger.info("Getting orders from agents...")
         board_state = game.get_state()
@@ -350,7 +376,7 @@ async def main():
                         game, agent.client, board_state, power_name, possible_orders,
                         game_history, model_error_stats,
                         agent_goals=agent.goals, agent_relationships=agent.relationships,
-                        agent_private_diary_str=agent.format_private_diary_for_prompt(),
+                        agent_private_diary_str=agent.get_latest_phase_diary_entries(), # only include latest phase in orders prompt
                         log_file_path=llm_log_file_path, phase=current_phase,
                     )
                 )
@@ -378,10 +404,11 @@ async def main():
             submitted_orders_this_phase[p_name] = valid + invalid
 
             # diary entry only for the orders we tried to submit
-            if valid or invalid:
-                await agents[p_name].generate_order_diary_entry(
-                    game, valid + invalid, llm_log_file_path
-                )
+            if False: # disabled for now
+                if valid or invalid:
+                    await agents[p_name].generate_order_diary_entry(
+                        game, valid + invalid, llm_log_file_path
+                    )
                 
         # --- 4d. Process Phase ---
         completed_phase = current_phase
@@ -414,26 +441,18 @@ async def main():
         all_orders_this_phase = game.order_history.get(current_short_phase, {})
         
         # Phase Result Diary Entries
-        phase_result_diary_tasks = [
-            agent.generate_phase_result_diary_entry(game, game_history, phase_summary, all_orders_this_phase, llm_log_file_path)
-            for agent in agents.values() if not game.powers[agent.power_name].is_eliminated()
-        ]
-        if phase_result_diary_tasks:
-            await asyncio.gather(*phase_result_diary_tasks, return_exceptions=True)
-
-        # Diary Consolidation
-        if current_short_phase.startswith("S") and current_short_phase.endswith("M"):
-            consolidation_tasks = [
-                run_diary_consolidation(agent, game, llm_log_file_path,
-                                        prompts_dir=agent.prompts_dir)
-                for agent in agents.values()
-                if not game.powers[agent.power_name].is_eliminated()
+        if current_short_phase.endswith("M"):
+            phase_result_diary_tasks = [
+                agent.generate_phase_result_diary_entry(game, game_history, phase_summary, all_orders_this_phase, llm_log_file_path, current_short_phase)
+                for agent in agents.values() if not game.powers[agent.power_name].is_eliminated()
             ]
-            if consolidation_tasks:
-                await asyncio.gather(*consolidation_tasks, return_exceptions=True)
+            if phase_result_diary_tasks:
+                await asyncio.gather(*phase_result_diary_tasks, return_exceptions=True)
+
+        
 
         # Agent State Updates
-        if current_short_phase.endswith("M"):
+        if current_short_phase.endswith("M") and run_config.num_negotiation_rounds == 0: # r'ships are updated in negotiation round. otherwise in no press, updated in a separate step.
             current_board_state = game.get_state()
             state_update_tasks = [
                 agent.analyze_phase_and_update_state(game, current_board_state, phase_summary, game_history, llm_log_file_path)
@@ -443,7 +462,7 @@ async def main():
                 await asyncio.gather(*state_update_tasks, return_exceptions=True)
 
         # --- 4f. Save State At End of Phase ---
-        save_game_state(game, agents, game_history, game_file_path, run_config, completed_phase)
+        await save_game_state(game, agents, game_history, game_file_path, run_config, completed_phase)
         logger.info(f"Phase {current_phase} took {time.time() - phase_start:.2f}s")
 
     # --- 5. Game End ---
